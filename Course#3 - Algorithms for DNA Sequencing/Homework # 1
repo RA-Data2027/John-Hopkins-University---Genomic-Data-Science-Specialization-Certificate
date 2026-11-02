@@ -1,0 +1,413 @@
+from pathlib import Path
+
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
+
+
+# --------------------------------------------------
+# Read the FASTA file
+# --------------------------------------------------
+
+def read_fasta(filename):
+    """Read a FASTA file and return its records."""
+    with open(filename) as handle:
+        records = list(SeqIO.parse(handle, "fasta"))
+
+    return records
+
+
+project_folder = Path(__file__).resolve().parent
+filename = project_folder / "data" / "dna2.txt"
+
+records = read_fasta(filename)
+
+print("File loaded successfully.")
+print("Number of records:", len(records))
+print("\nSequence lengths:")
+
+for record in records:
+    print(record.id, len(record.seq))
+
+
+# --------------------------------------------------
+# Longest and shortest sequences
+# --------------------------------------------------
+
+longest_length = max(len(record.seq) for record in records)
+shortest_length = min(len(record.seq) for record in records)
+
+print("\nLongest sequence length:", longest_length)
+print("Identifiers with this length:")
+
+for record in records:
+    if len(record.seq) == longest_length:
+        print(record.id)
+
+print("\nShortest sequence length:", shortest_length)
+print("Identifiers with this length:")
+
+for record in records:
+    if len(record.seq) == shortest_length:
+        print(record.id)
+
+
+# --------------------------------------------------
+# Display codons in a reading frame
+# --------------------------------------------------
+
+def show_codons(sequence, frame):
+    offset = frame - 1
+
+    for i in range(offset, len(sequence) - 2, 3):
+        codon = sequence[i:i + 3]
+        print("Position:", i + 1, "Codon:", codon)
+
+
+print("\nTesting reading frame 1:")
+show_codons("ATGCCCTAG", 1)
+
+
+# --------------------------------------------------
+# Find complete forward ORFs
+# Positions are 1-based and include the stop codon.
+# --------------------------------------------------
+
+def find_orfs(sequence, frame):
+    if frame not in (1, 2, 3):
+        raise ValueError("Frame must be 1, 2, or 3.")
+
+    sequence = str(sequence).upper()
+    stop_codons = {"TAA", "TAG", "TGA"}
+    pending_starts = []
+    orfs = []
+
+    for i in range(frame - 1, len(sequence) - 2, 3):
+        codon = sequence[i:i + 3]
+
+        if codon == "ATG":
+            pending_starts.append(i)
+
+        elif codon in stop_codons:
+            for start in pending_starts:
+                orfs.append({
+                    "start": start + 1,
+                    "end": i + 3,
+                    "length": i + 3 - start,
+                })
+
+            pending_starts.clear()
+
+    return orfs
+
+
+print("\nORF tests:")
+
+print("Complete ORF:")
+print(find_orfs("ATGCCCTAG", 1))
+
+print("No stop codon:")
+print(find_orfs("ATGAAAAAA", 1))
+
+print("Two start codons before one stop:")
+print(find_orfs("ATGATGTAA", 1))
+
+print("\nFrame 2 test:")
+print(find_orfs("AATGCCCTAG", 2))
+
+print("\nFrame 3 test:")
+print(find_orfs("AAATGCCCTAG", 3))
+
+
+# --------------------------------------------------
+# Collect and report ORFs
+# --------------------------------------------------
+
+def collect_orfs(records, frame):
+    all_orfs = []
+
+    for record in records:
+        sequence_orfs = find_orfs(record.seq, frame)
+
+        for orf in sequence_orfs:
+            all_orfs.append({
+                "id": record.id,
+                "frame": frame,
+                **orf,
+            })
+
+    return all_orfs
+
+
+def print_longest_orfs(orfs):
+    if not orfs:
+        print("No complete ORFs found.")
+        return
+
+    longest_length = max(orf["length"] for orf in orfs)
+
+    print("Longest ORF length:", longest_length)
+
+    for orf in orfs:
+        if orf["length"] == longest_length:
+            print("Sequence identifier:", orf["id"])
+            print("Reading frame:", orf["frame"])
+            print("Start position:", orf["start"])
+            print("End position:", orf["end"])
+            print()
+
+
+practice_records = [
+    SeqRecord(Seq("ATGCCCTAG"), id="practice_a"),
+    SeqRecord(Seq("ATGAAACCCTAA"), id="practice_b"),
+]
+
+print("\nLongest ORF practice test:")
+
+practice_orfs = collect_orfs(practice_records, 1)
+print_longest_orfs(practice_orfs)
+
+
+# Analyze each forward reading frame separately.
+for frame in (1, 2, 3):
+    print(f"\nFASTA file: reading frame {frame}")
+
+    file_orfs = collect_orfs(records, frame)
+    print_longest_orfs(file_orfs)
+
+
+# Explicitly report the longest ORF across all forward frames.
+print("\nFASTA file: longest ORF across all forward reading frames")
+
+all_forward_orfs = [
+    orf
+    for frame in (1, 2, 3)
+    for orf in collect_orfs(records, frame)
+]
+
+print_longest_orfs(all_forward_orfs)
+
+
+# --------------------------------------------------
+# Count overlapping substrings
+# Sequences are counted separately, not joined together.
+# --------------------------------------------------
+
+def count_repeats(sequences, n):
+    if n <= 0:
+        raise ValueError("Repeat length must be greater than zero.")
+
+    counts = {}
+
+    for sequence in sequences:
+        sequence = str(sequence).upper()
+
+        for i in range(len(sequence) - n + 1):
+            substring = sequence[i:i + n]
+            counts[substring] = counts.get(substring, 0) + 1
+
+    return counts
+
+
+print("\nRepeat-counting practice tests:")
+
+print("ACACA, length 3:")
+print(count_repeats(["ACACA"], 3))
+
+print("AAAAA, length 3:")
+print(count_repeats(["AAAAA"], 3))
+
+print("Two separate sequences, length 3:")
+print(count_repeats(["AA", "AA"], 3))
+
+
+# --------------------------------------------------
+# Summarize repeated substrings
+# --------------------------------------------------
+
+def summarize_repeats(counts):
+    repeats = {
+        substring: count
+        for substring, count in counts.items()
+        if count > 1
+    }
+
+    if not repeats:
+        print("No repeats found.")
+        return
+
+    highest_count = max(repeats.values())
+
+    print("Number of distinct repeated substrings:", len(repeats))
+    print("Highest occurrence count:", highest_count)
+    print("Most frequent repeat(s):")
+
+    for substring, count in sorted(repeats.items()):
+        if count == highest_count:
+            print(substring, count)
+
+
+print("\nRepeat summary practice test:")
+practice_counts = count_repeats(["ACACA"], 3)
+summarize_repeats(practice_counts)
+
+print("\nTied repeats practice test:")
+practice_counts = count_repeats(["AAAA", "CCCC"], 3)
+summarize_repeats(practice_counts)
+
+print("\nNo repeats practice test:")
+practice_counts = count_repeats(["ACGT"], 3)
+summarize_repeats(practice_counts)
+
+
+# --------------------------------------------------
+# Count length-3 repeats across the FASTA records
+# --------------------------------------------------
+
+repeat_length = 3
+
+print(f"\nFASTA file: repeats of length {repeat_length}")
+
+sequences = [record.seq for record in records]
+file_counts = count_repeats(sequences, repeat_length)
+
+summarize_repeats(file_counts)
+
+
+# Check the total number of counted windows.
+expected_windows = sum(
+    max(0, len(sequence) - repeat_length + 1)
+    for sequence in sequences
+)
+
+counted_windows = sum(file_counts.values())
+
+print("Expected number of windows:", expected_windows)
+print("Counted number of windows:", counted_windows)
+
+assert counted_windows == expected_windows, "Window counts do not match."
+
+
+# --------------------------------------------------
+# Analyze a sequence selected by its full identifier
+# --------------------------------------------------
+
+def report_sequence_orfs(records, sequence_id, frame):
+    matching_records = [
+        record for record in records
+        if record.id == sequence_id
+    ]
+
+    if not matching_records:
+        print("Sequence identifier not found:", sequence_id)
+        return
+
+    if len(matching_records) > 1:
+        print("Multiple records have this identifier:", sequence_id)
+        return
+
+    sequence_orfs = collect_orfs(matching_records, frame)
+
+    print("\nSelected sequence:", sequence_id)
+    print("Requested reading frame:", frame)
+    print_longest_orfs(sequence_orfs)
+
+
+print("\nSequence-specific ORF practice test:")
+
+report_sequence_orfs(
+    practice_records,
+    "practice_a",
+    1,
+)
+
+
+# Settings for a sequence-specific lookup.
+selected_id = "gi|142022655|gb|EQ086233.1|45"
+selected_frame = 1
+
+print("\nFASTA sequence-specific ORF lookup:")
+
+report_sequence_orfs(
+    records,
+    selected_id,
+    selected_frame,
+)
+
+
+# --------------------------------------------------
+# Print all repeated substrings
+# --------------------------------------------------
+
+def print_all_repeats(counts):
+    repeats = [
+        (substring, count)
+        for substring, count in counts.items()
+        if count > 1
+    ]
+
+    if not repeats:
+        print("No repeats found.")
+        return
+
+    for substring, count in sorted(
+        repeats,
+        key=lambda item: (-item[1], item[0]),
+    ):
+        print(substring, count)
+
+
+print("\nAll repeats practice test:")
+
+practice_counts = count_repeats(["ACACAC"], 3)
+print_all_repeats(practice_counts)
+
+print(f"\nAll FASTA repeats of length {repeat_length}:")
+print_all_repeats(file_counts)
+
+
+# --------------------------------------------------
+# Longest ORF across all forward frames for sequence |16
+# --------------------------------------------------
+
+selected_records = [
+    record for record in records
+    if record.id == "gi|142022655|gb|EQ086233.1|16"
+]
+
+print("\nSequence |16: longest ORF across all forward reading frames")
+
+print_longest_orfs([
+    orf
+    for frame in (1, 2, 3)
+    for orf in collect_orfs(selected_records, frame)
+])
+
+
+# --------------------------------------------------
+# Most frequent repeat of length 6
+# --------------------------------------------------
+
+print("\nRepeats of length 6:")
+summarize_repeats(count_repeats(sequences, 6))
+
+
+# --------------------------------------------------
+# Number of different 12-base sequences tied at Max
+# --------------------------------------------------
+
+counts_12 = count_repeats(sequences, 12)
+max_count = max(counts_12.values())
+
+print(
+    "\nNumber of 12-base sequences occurring Max times:",
+    sum(count == max_count for count in counts_12.values()),
+)
+
+
+# --------------------------------------------------
+# Most frequent repeat of length 7
+# --------------------------------------------------
+
+print("\nRepeats of length 7:")
+summarize_repeats(count_repeats(sequences, 7))
